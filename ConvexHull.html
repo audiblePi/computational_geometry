@@ -1,0 +1,257 @@
+ <head>
+	<meta charset="UTF-8">
+	<link rel="stylesheet" type="text/css" href="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraph.css" />
+	<script type="text/javascript" src="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraphcore.js"></script>
+</head>
+
+<body>
+	<div id="jxgbox" class="jxgbox" style="left:350px; position:absolute; width:1000px; height:600px;"> </div> 	
+	<button id="button1" type="button" style="width:250px; position:absolute;  top:300px;" onclick="findConvexHull(board)">Find convex hull</button>
+	<div id="textDiv" style="position:absolute; top:250px; color:blue; "></div>
+</body>
+
+<script type="text/javascript">	
+
+/***************** Do not alter, unless required! ***************/
+var boardParams = { boundingbox: [-0.2,50,50,-0.2], 
+	               grid :true, 
+	               axis: false, 
+	               showCopyright:false, 
+	               showNavigation:false, 
+	              };
+			  	
+var getMouseCoords = function(e, i) {
+	var cPos = board.getCoordsTopLeftCorner(e, i),
+	absPos = JXG.getPosition(e, i),
+	dx = absPos[0] - cPos[0],
+	dy = absPos[1] - cPos[1];
+    return new JXG.Coords(JXG.COORDS_BY_SCREEN, [dx, dy], board);
+}; 
+
+/* Mouse drawing function */
+var down = function(e) {
+	var canCreatePoint = true, i, coords;
+	if (e[JXG.touchProperty])			
+		i = 0; 				
+	coords = getMouseCoords(e, i);
+	var point = board.create('point',[coords.usrCoords[1],coords.usrCoords[2]], {highlightFillColor:'Gray', highlightStrokeColor:'Gray', size:2, 		
+                fillColor:'RoyalBlue',  strokeColor:'RoyalBlue'});
+};
+
+/* Create a board */
+var board = JXG.JSXGraph.initBoard('jxgbox',boardParams);		
+board.on('down', down);
+board.off('off', down);
+/*********************************************************************/
+
+
+
+
+
+
+
+
+/**
+ * Author: Brian Hicks
+ * Version: 0.0.1
+ */
+var upperHull = []			//store hull points
+var lowerHull = []
+var upperHullSegments = [] 	//store hull segment objects
+var lowerHullSegments = []
+var _config = {				// configurable settings
+	animationSpeed: 250,
+	hullColor: "green"
+}
+
+/* The Graham's scan function */
+function findConvexHull(board){
+	var N = 0, P = {};			
+	
+	for(var el in board.objects){
+		if(board.objects[el].elType == 'point')
+		{
+			P[N] = board.objects[el];		
+			N++;
+		}
+	}
+
+	if (upperHullSegments.length>0 || 
+		lowerHullSegments.length>0 || 
+		upperHull.length>0 || 
+		lowerHull.length>0)
+		clearData()
+		
+	if (Object.keys(P).length > 2){
+		// sort the point set P
+		var sortedPoints = sortPoints(P)
+
+		// run Graham's scan to obtain the convex hull points
+		var convexHull = runGrahamsScan(sortedPoints)
+    }
+}
+
+/**
+ * convert the object array into an array of objects
+ * keep the original object for use with the jsxgraph api
+ * sort by x coordinate, then y coordinate if equal (lexigraphical)
+ */
+var sortPoints = function (array){
+	var pointArray = []
+
+	for (var key in array)
+		pointArray.push({ 
+			x: array[key].X(), 
+			y: array[key].Y(), 
+			obj: array[key]
+		})
+
+	pointArray.sort(function(a, b){
+		if (a.x == b.x)
+			return a.y - b.y
+		else
+			return a.x - b.x
+	})
+
+	return pointArray
+}
+
+/**
+ * convert the object array into an array of objects
+ * keep the original object for use with the jsxgraph api
+ * sort by x coordinate, then y coordinate if equal (lexigraphical)
+ */
+var runGrahamsScan = function (points){
+	upperHull.push(points[0], points[1])
+	lowerHull.push(points[points.length-1], points[points.length-2])
+
+	upperHullSegments = drawConvexHull(upperHull)
+
+	// compare points to the right of the current upper hull for left turns
+	for (var i=2; i<points.length; i++){
+		//this closure provides timing for animation
+		(function (i) { setTimeout(function () {
+			upperLoop(i)
+			
+			//once upper hull is done, start lower hull
+			if (i==points.length-1)
+				lowerLoop()
+		}, _config.animationSpeed*i)})(i)
+	}
+
+	/**
+	 * clear the graph
+	 * find the hull points
+	 * draw the new hull
+	 */
+	upperLoop = function(i){
+		removeHull(upperHullSegments)
+		upperHull = grahamsLoop(i, upperHull, points)
+		upperHullSegments = drawConvexHull(upperHull)
+	}
+
+	/**
+	 * setup the lower hull
+	 * find the hull points (in reverse)
+	 * draw the new hull
+	 */
+	lowerLoop = function(){
+		lowerHullSegments = drawConvexHull(lowerHull)
+
+		// compare points to the left of the current lower hull for left turns
+		for (var j=1; j<=points.length-3+1; j++){
+			var counter = points.length-3;
+		 	(function (j) { setTimeout(function () {
+				removeHull(lowerHullSegments)
+		 		lowerHull = grahamsLoop(counter, lowerHull, points)
+		 		lowerHullSegments = drawConvexHull(lowerHull)
+		 		counter--
+		 	}, _config.animationSpeed*j)})(j)
+		}
+	}
+
+	return upperHull.concat(lowerHull)
+}
+
+/**
+ * Recursively remove points from the hull that make a left turn
+ */
+var grahamsLoop = function (i, hull, points){	
+	while (hull.length >= 2 && !makesRightTurn(
+		hull[hull.length-2],
+		hull[hull.length-1],
+		points[i]
+	)){
+		hull.pop()
+	}
+	hull.push(points[i])
+
+	return hull
+}
+
+/**
+ * Computes the cross product of two lines 
+ * Collinear lines produces zero 
+ * Right turn is negative
+ * Left turn is positive
+ */
+var makesRightTurn = function (p0, p1, p2){	
+	return ((p0.x-p2.x)*(p1.y-p2.y) - (p0.y-p2.y)*(p1.x-p2.x) <= 0);
+}
+
+/**
+ * Draws a new segment using two points
+ * Returns the object for use later(deletion)
+ */
+var drawSegment = function (p1, p2, color, dash){
+	return board.create(
+		'segment', 
+		[p1, p2],
+		{ 
+			fillColor: color,
+			strokeColor: color,
+			dash: dash
+		}
+	)
+}
+
+/**
+ * Draws the current convex hull
+ * Returns an array of segments for use later (deletion)
+ */
+var drawConvexHull = function(convexHull){
+    var hullSegments = []
+
+    for (i=0; i < convexHull.length - 1; i++){
+    	var segment = drawSegment(convexHull[i].obj, convexHull[i+1].obj, 'green', 0)
+    	hullSegments.push(segment)
+    }
+
+    return hullSegments
+}
+
+/**
+ * Removes the current convex hull
+ */
+var removeHull = function(convexHull){
+	convexHull.forEach(function(element, index){
+		board.removeObject(element)
+	})
+}
+
+/**
+ * Removes all data, erases hull from graph
+ */
+var clearData = function(){
+	removeHull(upperHullSegments)
+	removeHull(lowerHullSegments)
+	upperHullSegments = []
+	lowerHullSegments = []
+	upperHull = []
+	lowerHull = []
+}
+</script>
+
+
+
+

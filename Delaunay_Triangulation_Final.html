@@ -1,0 +1,390 @@
+
+ <head>
+	<meta charset="UTF-8">
+	<link rel="stylesheet" type="text/css" href="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraph.css" />
+	<script type="text/javascript" src="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraphcore.js"></script>
+</head>
+
+<style>
+	button {
+		width:300px;
+		display:block;
+		padding:1rem;
+		margin-bottom: 1rem;
+	}
+	button.generate{
+		display:inline-block;
+		width:200px;
+	}
+	input#input{
+		padding: .95rem;
+    	width: 95px;
+	}
+	input[type="checkbox"]{
+		padding: 1rem;
+	    height: 1rem;
+	    width: 1rem;
+	}
+</style>
+
+<body>
+	<div id="jxgbox" class="jxgbox" style="left:350px; position:absolute; width:1000px; height:600px;"> </div> 	
+	
+	<button type="button" class="generate" onclick="generateRandomPoints()">Generate Points</button>
+	<input type="number" id="input" name="quantity" min="1" max="100" value="3">
+	<button type="button" onclick="triangulate(board)">Triangulate</button>
+	<input type="checkbox" id="showTriangles" name="showTriangles" checked onclick="handleShowTriangles();">Show Triangles<br>
+  	<input type="checkbox" id="showCircumCircles" name="showCircumCircles" onclick="handleShowCircumCircles();">Show CircumCircles<br>
+</body>
+
+<script type="text/javascript">	
+
+/**
+ * Author: Brian Hicks
+ * Version: 0.0.1
+ */
+
+var _config = {				// configurable settings
+	animationSpeed: 5000,
+	hullColor: "green"
+}
+var triangles = []
+var drawnSegments = []
+var drawnCircles = []
+var boundingTriangle = []
+var boardParams = { boundingbox: [0,50,50,0], 
+	               grid :true, 
+	               axis: false, 
+	               showCopyright:false, 
+	               showNavigation:false, 
+	              };
+var board = JXG.JSXGraph.initBoard('jxgbox',boardParams);	
+var showTriangles = document.getElementById("showTriangles")
+var showCircumCircles = document.getElementById("showCircumCircles")
+
+
+			  	
+var getMouseCoords = function(e, i) {
+	var cPos = board.getCoordsTopLeftCorner(e, i),
+	absPos = JXG.getPosition(e, i),
+	dx = absPos[0] - cPos[0],
+	dy = absPos[1] - cPos[1];
+    return new JXG.Coords(JXG.COORDS_BY_SCREEN, [dx, dy], board);
+}; 
+
+var down = function(e) {
+	var canCreatePoint = true, i, coords;
+	if (e[JXG.touchProperty])			
+		i = 0; 				
+	coords = getMouseCoords(e, i);
+	var point = board.create(
+		'point',
+		[coords.usrCoords[1],coords.usrCoords[2]], 
+		{highlightFillColor:'Gray', 
+		highlightStrokeColor:'Gray', 
+		size:2, 		
+        fillColor:'RoyalBlue',
+        strokeColor:'RoyalBlue'
+    });
+
+    triangulate(board)
+};
+
+var handleShowTriangles = function() {
+	if (showTriangles.checked) {
+		drawTriangles()
+	}
+	else {
+		clearTriangles()
+	}
+}
+
+var handleShowCircumCircles = function() {
+	if (showCircumCircles.checked) {
+		drawCircumCircles()
+	}
+	else {
+		clearCircumCircles()
+	}
+}
+
+board.on('down', down);
+board.off('off', down);
+
+
+
+
+/**
+Create a bounding triangle that contains all points
+Initialize triangualtion T with this triangle
+For each point (p)
+	Insert into triangulation T
+	Find all triangles in T that contains p (in circumcircle)
+	If p lies inside triangle t
+		Remove those triangles
+	Create new triangles with new point and incident edges
+	Remove bouding triangle
+**/
+var triangulate = function(board) {
+	var points = getPoints(board)
+
+	clearTriangles()
+	clearCircumCircles()
+	clearData()
+
+	if (points.length > 2){
+	 	triangles = delaunay_triangulation(points)
+
+		if (showTriangles.checked)
+		 	drawTriangles()
+
+		if (showCircumCircles.checked)
+	 		drawCircumCircles()
+    }
+}
+
+var delaunay_triangulation = function(points){
+	var triangles = []
+
+	boundingTriangle = createBoundingTriangle(points);
+    triangles.push(boundingTriangle)
+
+	points.forEach(function(p, i) {
+			triangles = addPoint(p, triangles)
+    });
+
+	triangles = removeBoundingTriangles(triangles)
+		
+   return triangles
+}
+
+var addPoint = function(point, triangles) {    
+	var incidentEdges = []
+    var uniqueEdges = []
+
+	//clear all illegal triangles
+    triangles = triangles.filter(function(triangle) {
+   		if (isInCircumcircle(point, triangle)) {
+		 	incidentEdges.push([triangle[0], triangle[1]])
+		 	incidentEdges.push([triangle[1], triangle[2]])
+		 	incidentEdges.push([triangle[2], triangle[0]])
+			return false
+    	}
+    	return true
+    })
+
+    //some new edges may be duplicated, remove
+    incidentEdges.forEach(function(edge1, i){
+		var duplicateEdges = incidentEdges.filter(function(edge2){
+			var count = 0
+			if (edge1 == edge2)
+				return false
+
+			count = edge1.includes(edge2[0]) ? count + 1 : count;
+			count = edge1.includes(edge2[1]) ? count + 1 : count;
+
+			if (count > 1)
+				return true
+			else
+				return false
+		})
+
+		if (duplicateEdges.length == 0){
+			uniqueEdges.push(edge1)
+		}
+	})
+
+    //create new triangles with new point and incident edges
+ 	uniqueEdges.forEach(function(edge){
+ 		triangles.push([point, edge[0], edge[1]])
+ 	})
+
+    return triangles
+}
+
+var isInCircumcircle = function(point, triangle){
+	var circumCircle = board.create('circumcircle', [triangle[0].obj, triangle[1].obj, triangle[2].obj]);
+	var isInCircumCircle = circumCircle.center.Dist(point.obj) <= circumCircle.radius
+	
+	board.removeObject(circumCircle)
+
+	return isInCircumCircle
+}
+
+var createBoundingTriangle = function(points) {
+    var minx, miny, maxx, maxy;
+    
+    points.forEach(function(point) {
+      if (minx === undefined || point.x < minx) { minx = point.x; }
+      if (miny === undefined || point.y < miny) { miny = point.y; }
+      if (maxx === undefined || point.x > maxx) { maxx = point.x; }
+      if (maxy === undefined || point.y > maxy) { maxy = point.y; }
+    });
+
+    var dx = (maxx - minx) * 5;
+    var dy = (maxy - miny) * 5;
+
+    var boundingTriangle_0 = {
+    	x: minx - dx, 
+    	y: miny - dy * 3,
+    	obj: board.create(
+    			'point',
+    			[minx - dx, miny - dy * 3], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+
+    var boundingTriangle_1 = {
+    	x: minx - dx, 
+    	y: maxy + dy,
+    	obj: board.create(
+    			'point',
+    			[minx - dx, maxy + dy], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+
+    var boundingTriangle_2 = {
+    	x: maxx + dx * 3,
+    	y: maxy + dy,
+    	obj: board.create(
+    			'point',
+    			[maxx + dx * 3, maxy + dy], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+
+    return [boundingTriangle_0, boundingTriangle_1, boundingTriangle_2];
+}
+
+var removeBoundingTriangles = function(triangles) {
+	boundingTriangle.forEach(function(element){
+		board.removeObject(element.obj)
+	})
+
+	return triangles.filter(function(triangle){
+		if ((triangle.includes(boundingTriangle[0])) || (triangle.includes(boundingTriangle[1])) || (triangle.includes(boundingTriangle[2]))) {
+			return false
+		}
+
+		return true
+	})
+}
+
+/**
+ * Generate Random Points
+ */
+var generateRandomPoints = function() {
+	var input = document.getElementById("input").value
+
+	for (var i = 0; i < input; i++) {
+		var point = board.create(
+			'point',
+			[Math.random() * 50, Math.random() * 50], 
+			{highlightFillColor:'Gray', 
+			highlightStrokeColor:'Gray', 
+			size:2, 		
+	        fillColor:'RoyalBlue',
+	        strokeColor:'RoyalBlue'
+	    });
+	}
+}
+
+/**
+ * convert the object array into an array of objects
+ * keep the original object for use with the jsxgraph api
+ */
+var getPoints = function(board) {
+	var pointArray = []
+
+	for(var el in board.objects){
+		if(board.objects[el].elType == 'point'){
+			pointArray.push({ 
+				x: board.objects[el].X(), 
+				y: board.objects[el].Y(), 
+				obj: board.objects[el]
+			})
+		}
+	}
+
+	return pointArray
+}
+
+/**
+ * Draws a new segment using two points
+ * Returns the object for use later(deletion)
+ */
+var drawSegment = function(p1, p2, color, dash) {
+	return board.create(
+		'segment', 
+		[p1, p2],
+		{ 
+			fillColor: color,
+			strokeColor: color,
+			dash: dash
+		}
+	)
+}
+
+var clearData = function() {
+	triangles = []
+	drawnSegments = []
+	drawnCircles = []
+	boundingTriangle = []
+}
+
+var drawTriangles = function() {
+	triangles.forEach(function(e, i){
+		var segment1 = drawSegment(e[0].obj, e[1].obj, 'green', 0)
+		var segment2 = drawSegment(e[1].obj, e[2].obj, 'green', 0)
+		var segment3 = drawSegment(e[2].obj, e[0].obj, 'green', 0)
+		drawnSegments.push(segment1, segment2, segment3)
+	})
+}
+
+var drawCircumCircles = function() {
+	triangles.forEach(function(e, i){
+		var circumCircle = board.create(
+			'circumcircle', 
+			[e[0].obj, e[1].obj, e[2].obj],
+			{
+				strokeColor:'Gray',
+        		dash: 1,
+        	}
+        );
+		drawnCircles.push(circumCircle)
+	})
+}
+
+var clearTriangles = function() {
+	drawnSegments.forEach(function(element, index){
+		board.removeObject(element)
+	})
+	drawnSegments = []
+}	
+
+var clearCircumCircles = function() {
+	drawnCircles.forEach(function(element, index){
+		board.removeObject(element)
+	})
+	drawnCircles = []
+}
+</script>

@@ -1,0 +1,503 @@
+ <head>
+	<meta charset="UTF-8">
+	<link rel="stylesheet" type="text/css" href="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraph.css" />
+	<script type="text/javascript" src="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraphcore.js"></script>
+</head>
+
+<body>
+	<div id="jxgbox" class="jxgbox" style="left:350px; position:absolute; width:1000px; height:600px;"> </div> 	
+	<button id="button1" type="button" style="width:250px; position:absolute;  top:300px;" onclick="findConvexHull(board)">Triangulate</button>
+	<div id="textDiv" style="position:absolute; top:250px; color:blue; "></div>
+</body>
+
+<script type="text/javascript">	
+
+/***************** Do not alter, unless required! ***************/
+var boardParams = { boundingbox: [-0.2,50,50,-0.2], 
+	               grid :true, 
+	               axis: false, 
+	               showCopyright:false, 
+	               showNavigation:false, 
+	              };
+			  	
+var getMouseCoords = function(e, i) {
+	var cPos = board.getCoordsTopLeftCorner(e, i),
+	absPos = JXG.getPosition(e, i),
+	dx = absPos[0] - cPos[0],
+	dy = absPos[1] - cPos[1];
+    return new JXG.Coords(JXG.COORDS_BY_SCREEN, [dx, dy], board);
+}; 
+
+/* Mouse drawing function */
+var down = function(e) {
+	var canCreatePoint = true, i, coords;
+	if (e[JXG.touchProperty])			
+		i = 0; 				
+	coords = getMouseCoords(e, i);
+	var point = board.create(
+		'point',
+		[coords.usrCoords[1],coords.usrCoords[2]], 
+		{highlightFillColor:'Gray', 
+		highlightStrokeColor:'Gray', 
+		size:2, 		
+        fillColor:'RoyalBlue',
+        strokeColor:'RoyalBlue'
+    });
+};
+
+/* Create a board */
+var board = JXG.JSXGraph.initBoard('jxgbox',boardParams);		
+board.on('down', down);
+board.off('off', down);
+/*********************************************************************/
+
+
+
+
+
+
+
+
+/**
+ * Author: Brian Hicks
+ * Version: 0.0.1
+ */
+var upperHull = []			//store hull points
+var lowerHull = []
+var upperHullSegments = [] 	//store hull segment objects
+var lowerHullSegments = []
+var _config = {				// configurable settings
+	animationSpeed: 1,
+	hullColor: "green"
+}
+
+/* The Graham's scan function */
+function findConvexHull(board){
+	var N = 0, P = {};			
+	
+	for(var el in board.objects){
+		if(board.objects[el].elType == 'point')
+		{
+			P[N] = board.objects[el];		
+			N++;
+		}
+	}
+		
+	if (Object.keys(P).length > 2){
+		// sort the point set P
+		var sortedPoints = sortPoints(P)
+
+	 	// run Graham's scan to obtain the convex hull points
+	 	var convexHull = runGrahamsScan(sortedPoints)
+
+	 	//triangulate - NOT PRETTY
+	 	var triangles = triangulate(convexHull, sortedPoints)
+    	
+	 	//attempt at delaunay triangulation
+	 	//delaunay_triangulation(sortedPoints)
+
+    	//draw triangles
+	 	drawTriangles(triangles)
+    }
+}
+
+/**
+ * convert the object array into an array of objects
+ * keep the original object for use with the jsxgraph api
+ * sort by x coordinate, then y coordinate if equal (lexigraphical)
+ */
+var sortPoints = function (array){
+	var pointArray = []
+
+	for (var key in array)
+		pointArray.push({ 
+			x: array[key].X(), 
+			y: array[key].Y(), 
+			obj: array[key]
+		})
+
+	pointArray.sort(function(a, b){
+		if (a.x == b.x)
+			return a.y - b.y
+		else
+			return a.x - b.x
+	})
+
+	return pointArray
+}
+
+/**
+ * convert the object array into an array of objects
+ * keep the original object for use with the jsxgraph api
+ * sort by x coordinate, then y coordinate if equal (lexigraphical)
+ */
+var runGrahamsScan = function (points){
+	upperHull.push(points[0], points[1])
+	lowerHull.push(points[points.length-1], points[points.length-2])
+
+	// compare points to the right of the current upper hull for left turns
+	for (var i=2; i<points.length; i++){
+		upperHull = grahamsLoop(i, upperHull, points)
+	}
+
+	for (var j=points.length-3; j>=0; j--){
+ 		lowerHull = grahamsLoop(j, lowerHull, points)
+	}
+
+	upperHull.pop()
+	//lowerHull.pop()
+
+	return upperHull.concat(lowerHull)
+}
+
+/**
+ * Recursively remove points from the hull that make a left turn
+ */
+var grahamsLoop = function (i, hull, points){	
+	while (hull.length >= 2 && !makesRightTurn(
+		hull[hull.length-2],
+		hull[hull.length-1],
+		points[i]
+	)){
+		hull.pop()
+	}
+	hull.push(points[i])
+
+	return hull
+}
+
+/**
+ * Computes the cross product of two lines 
+ * Collinear lines produces zero 
+ * Right turn is negative
+ * Left turn is positive
+ */
+var makesRightTurn = function (p0, p1, p2){	
+	return ((p0.x-p2.x)*(p1.y-p2.y) - (p0.y-p2.y)*(p1.x-p2.x) <= 0);
+}
+
+/**
+ * Draws a new segment using two points
+ * Returns the object for use later(deletion)
+ */
+var drawSegment = function (p1, p2, color, dash){
+	return board.create(
+		'segment', 
+		[p1, p2],
+		{ 
+			fillColor: color,
+			strokeColor: color,
+			dash: dash
+		}
+	)
+}
+
+/**
+ * Draws the current convex hull
+ * Returns an array of segments for use later (deletion)
+ */
+var drawConvexHull = function(convexHull){
+    var hullSegments = []
+
+    for (i=0; i < convexHull.length - 1; i++){
+    	var segment = drawSegment(convexHull[i].obj, convexHull[i+1].obj, 'green', 0)
+    	hullSegments.push(segment)
+    }
+
+    var segment = drawSegment(convexHull[convexHull.length-1].obj, convexHull[0].obj, 'green', 0)
+    hullSegments.push(segment)
+
+    return hullSegments
+}
+
+/**
+ * Removes the current convex hull
+ */
+var removeHull = function(convexHull){
+	convexHull.forEach(function(element, index){
+		board.removeObject(element)
+	})
+}
+
+/**
+ * Removes all data, erases hull from graph
+ */
+var clearData = function(){
+	removeHull(upperHullSegments)
+	removeHull(lowerHullSegments)
+	upperHullSegments = []
+	lowerHullSegments = []
+	upperHull = []
+	lowerHull = []
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/***************************************************
+ * Triangulate using convex hull vertices and points
+ ***************************************************/
+var triangulate = function(convexHull, sortedPoints){
+	var interiorPoints = []
+	var triangles = []
+
+	//find the interior points (not on convex hull)
+	for (i=0; i<sortedPoints.length; i++){
+		var match = false
+		for (j=0; j<convexHull.length; j++){
+			if (sortedPoints[i].obj == convexHull[j].obj)
+				match = true
+		}
+		if (!match)
+			interiorPoints.push(sortedPoints[i])
+	}
+
+	//triangulation with convex vertices if hull is empty
+	if (interiorPoints.length == 0){
+		for (i=2; i<convexHull.length-1; i++){
+			var triangle = []
+
+			triangle.push(convexHull[0])
+			triangle.push(convexHull[i-1])
+			triangle.push(convexHull[i])
+
+			triangles.push(triangle)
+		}
+	}
+	else {
+		// for each interior point
+		// find the parent triangle
+		// triangulate with parent triangle vertices
+		for (i=0; i<interiorPoints.length; i++){
+			var parentTriangle = null
+			
+			triangles.forEach( (e) => {
+				if (isInTriangle(interiorPoints[i], e[0], e[1], e[2]))
+					parentTriangle = e
+			})
+
+			if (parentTriangle){
+				for (j=0; j<parentTriangle.length-1; j++){	
+					var triangle = []
+
+					triangle.push(interiorPoints[i])
+					triangle.push(parentTriangle[j])
+					triangle.push(parentTriangle[j+1])
+
+					triangles.push(triangle)
+				}
+			}
+			else {
+				for (k=1; k<convexHull.length; k++){
+					var triangle = []
+
+					triangle.push(interiorPoints[i])
+					triangle.push(convexHull[k])
+					triangle.push(convexHull[k-1])
+
+					triangles.push(triangle)
+				}
+			}
+		}
+	}
+
+	return triangles
+}
+
+/**
+ * Draws each segment of the triangle
+ */
+var drawTriangles = function (triangles){
+	triangles.forEach(function(e, i){
+		var segment = drawSegment(e[0].obj, e[1].obj, 'green', 0)
+		var segment = drawSegment(e[1].obj, e[2].obj, 'green', 0)
+		var segment = drawSegment(e[2].obj, e[0].obj, 'green', 0)
+	})
+}	
+
+/**
+ * Calculate whether point is inside a given triangle
+ * https://stackoverflow.com/questions/2049582/how-to-determine-if-a-point-is-in-a-2d-triangle
+ */
+var sign = function(p1, p2, p3){
+    return (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
+}
+
+var isInTriangle = function(point, v1, v2, v3){
+    var b1, b2, b3
+
+    b1 = sign(point, v1, v2) < 0
+    b2 = sign(point, v2, v3) < 0
+    b3 = sign(point, v3, v1) < 0
+
+    return ((b1 == b2) && (b2 == b3));
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+/***********************************
+ * Attempt at Delaunay Triangulation
+ ***********************************/
+var delaunay_triangulation = function(sortedPoints){
+	//console.log(sortedPoints)
+	var triangles = []
+	var boundingTriangle = createBoundingTriangle(sortedPoints);
+    //console.log(boundingTriangle)
+    
+    triangles.push(boundingTriangle)
+    console.log(triangles)
+	
+	drawTriangles(triangles)
+
+	triangles.push([
+		sortedPoints[0], 
+		sortedPoints[1],
+		sortedPoints[2]
+	])
+
+	sortedPoints.forEach(function(p, i) {
+		if (i>2)
+			triangles = addPoint(p, triangles);
+    });
+}
+
+function addPoint(point, triangles) {
+    // console.log(point)
+    // console.log(triangles)
+    
+    // Remove triangles with circumcircles containing the vertex
+    triangles = triangles.filter(function(triangle) {
+    	console.log( isInCircumcircle(point, triangle) )
+		if (isInCircumcircle(point, triangle)) {
+			triangles.push([
+				triangle[0], 
+				triangle[1],
+				triangle[2]
+			])
+			return false;
+		}
+		return true
+    })
+
+    return triangles
+}
+
+function isInCircumcircle(point, triangle) {
+	var center = findCenter(triangle)
+    var dx = center.x - point.x
+    var dy = center.y - point.y
+    var dist_squared = dx * dx + dy * dy
+    
+    dx = center.x - triangle[0].x
+    dy = center.y - triangle[0].y
+    
+    var radius_squared = dx * dx + dy * dy
+    
+    // console.log(dist_squared)
+    // console.log(radius_squared)
+    // console.log(dist_squared <= this.radius_squared)
+    return (dist_squared <= this.radius_squared);
+ }
+
+function findCenter(triangle){
+	//console.log(triangle)
+
+	var minx = Math.min(triangle[0].x, triangle[1].x, triangle[2].x);
+	var miny = Math.min(triangle[0].y, triangle[1].y, triangle[2].y);
+	var maxx = Math.max(triangle[0].x, triangle[1].x, triangle[2].x);
+	var maxy = Math.max(triangle[0].y, triangle[1].y, triangle[2].y);
+
+	var center = {
+		x: (minx + maxx) / 2,
+		y: (miny + maxy) / 2
+	}
+	return center
+}
+
+function createBoundingTriangle(points) {
+    var minx, miny, maxx, maxy;
+    
+    points.forEach(function(point) {
+      if (minx === undefined || point.x < minx) { minx = point.x; }
+      if (miny === undefined || point.y < miny) { miny = point.y; }
+      if (maxx === undefined || point.x > maxx) { maxx = point.x; }
+      if (maxy === undefined || point.y > maxy) { maxy = point.y; }
+    });
+
+    var dx = (maxx - minx) * 10;
+    var dy = (maxy - miny) * 10;
+
+    var boundingTriangle_0 = {
+    	x: minx - dx, 
+    	y: miny - dy * 3,
+    	obj: board.create(
+    			'point',
+    			[minx - dx, miny - dy * 3], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+    var boundingTriangle_1 = {
+    	x: minx - dx, 
+    	y: maxy + dy,
+    	obj: board.create(
+    			'point',
+    			[minx - dx, maxy + dy], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+    var boundingTriangle_2 = {
+    	x: maxx + dx * 3,
+    	y: maxy + dy,
+    	obj: board.create(
+    			'point',
+    			[maxx + dx * 3, maxy + dy], 
+    			{
+    				highlightFillColor:'Gray', 
+    				highlightStrokeColor:'Gray', 
+    				size:2, 		
+                	fillColor:'RoyalBlue', 
+                	strokeColor:'RoyalBlue'
+                }
+            )
+    }
+
+    return [boundingTriangle_0, boundingTriangle_1, boundingTriangle_2];
+}
+
+</script>
+
+
+
+

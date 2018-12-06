@@ -1,0 +1,190 @@
+ <head>
+	<meta charset="UTF-8">
+	<link rel="stylesheet" type="text/css" href="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraph.css" />
+	<script type="text/javascript" src="http://jsxgraph.uni-bayreuth.de/distrib/jsxgraphcore.js"></script>
+</head>
+
+<body>
+	<div id="jxgbox" class="jxgbox" style="left:350px; position:absolute; width:1000px; height:600px;"></div> 	
+	<button id="button1" type="button" style="width:250px; position:absolute;  top:300px;" onclick="generatePolygon(board)">Generate Polygon</button>
+	<button id="button2" type="button" style="width:250px; position:absolute;  top:350px;" onclick="placeThief(board)">Place Thief</button>
+	<button id="button3" type="button" style="width:250px; position:absolute;  top:400px;" onclick="detectPolygon(board)">Detect Polygon</button>
+	<div id="textDiv" style="position:absolute; top:0px; width:250px; color:blue; ">
+		<ul>
+			<li>Create the points for your first polygon</li>
+			<li>Click 'Generate Polygon'</li>
+			<li>Repeat for each polygon</li>
+			<li>When done, click 'Place Thief'</li>
+			<li>Place the Thief where wanted</li>
+			<li>Click 'Detect Polygon' to find the polygon containing the thief</li>
+		</ul>
+	</div>
+</body>
+
+<script type="text/javascript">	
+
+/***************** Do not alter, unless required! ***************/
+var boardParams = { boundingbox: [-0.2,50,50,-0.2], 
+	               grid :true, 
+	               axis: false, 
+	               showCopyright:false, 
+	               showNavigation:false, 
+	              };
+			  	
+var getMouseCoords = function(e, i) {
+	var cPos = board.getCoordsTopLeftCorner(e, i),
+	absPos = JXG.getPosition(e, i),
+	dx = absPos[0] - cPos[0],
+	dy = absPos[1] - cPos[1];
+    return new JXG.Coords(JXG.COORDS_BY_SCREEN, [dx, dy], board);
+}; 
+
+/* Mouse drawing function */
+var down = function(e) {
+	var canCreatePoint = true, i, coords;
+	if (e[JXG.touchProperty])			
+		i = 0; 				
+	coords = getMouseCoords(e, i);
+	var point = board.create(
+		'point',
+		[coords.usrCoords[1],coords.usrCoords[2]], 
+		{highlightFillColor:'Gray', 
+		highlightStrokeColor:'Gray', 
+		size:2, 		
+        fillColor:'RoyalBlue',
+        strokeColor:'RoyalBlue'
+    });
+};
+
+/* Create a board */
+var board = JXG.JSXGraph.initBoard('jxgbox',boardParams);		
+board.on('down', down);
+board.off('off', down);
+/*********************************************************************/
+
+
+
+
+
+
+
+
+/**
+ * Author: Brian Hicks
+ * Version: 0.0.1
+ */
+var polygons = []
+var thief
+var intersections = []
+
+/* Generate Polygon */
+function generatePolygon(board){
+	var N = 0
+	var pointArray = []			
+	
+	for(var el in board.objects){
+		if(board.objects[el].elType == 'point'){
+			
+			var belongsToPolygon = false
+	     	for(var key in board.objects[el].childElements){
+			 	if(board.objects[el].childElements[key].elType == 'polygon'){
+			 	 	belongsToPolygon = true
+			 	 	continue
+			 	}
+			}
+			if (!belongsToPolygon){
+				pointArray[N] = board.objects[el];	
+				N++;
+			}
+		}
+	}
+	
+
+	if (pointArray.length > 2){
+		var polygon = board.create(
+						'polygon', 
+						pointArray, 
+						{name: polygons.length});
+		polygons.push(polygon)
+    }
+}
+
+/*Place Thief*/
+function placeThief(board){	
+	button = document.getElementById("button2")
+	button.disabled = true
+
+	board.off('down')
+
+	board.on('down', function(e){
+		var canCreatePoint = true, i, coords;
+		if (e[JXG.touchProperty])			
+			i = 0; 				
+		coords = getMouseCoords(e, i);
+		thief = board.create(
+			'point',
+			[coords.usrCoords[1],coords.usrCoords[2]], 
+			{highlightFillColor:'Gray', 
+			highlightStrokeColor:'Gray', 
+			size:10, 		
+	        fillColor:'Red',
+	        strokeColor:'Red',
+	        name: 'Thief'
+	    });
+	});
+}
+
+/*Detect Polygon*/
+function detectPolygon(){
+	var ray = board.create(
+		'segment', 
+		[thief, [50.0, thief.Y()]], 
+		{visible: false})
+
+	polygons.forEach(function(element, index){
+		for (key in element.borders){
+			var i = board.create(
+				'intersection', 
+				[ray, element.borders[key], 1], 
+				{
+					name:key, 
+					alwaysIntersect: false, 
+					visible: false
+				});
+
+			if( !isNaN(i.X()) ){
+				intersections.push({
+					"intersection": i,
+					"polygon": element
+				})
+			}
+		}
+	})
+
+	// console.log(intersections[0]["polygon"])
+	// console.log(intersections.length)
+
+	if (intersections.length % 2 != 0){
+		sortIntersections()
+		intersections[0]["polygon"].setAttribute({fillColor: '#FFFF00'})
+	}
+
+	// console.log("polygons")
+	// console.log(polygons)
+	// console.log("thief")
+	// console.log(thief)
+	// console.log("intersections")
+	// console.log(intersections)
+}
+
+function sortIntersections(){
+	intersections.sort(function(a, b){
+		return a.intersection.X() - b.intersection.X()
+	})
+}
+
+</script>
+
+
+
+
